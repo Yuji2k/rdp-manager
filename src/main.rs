@@ -910,8 +910,8 @@ impl App {
         // Tabs vom letzten Mal wieder öffnen (nacheinander, nach dem Entsperren)
         let pending_connects: VecDeque<u64> =
             if store.restore_tabs { store.open_tabs.iter().copied().collect() } else { VecDeque::new() };
-        let upd_check = (store.update_check && !store.update_source.trim().is_empty())
-            .then(|| (update::check_async(&store.update_source, &cc.egui_ctx), false));
+        // leere Quelle = offizielle GitHub-Releases
+        let upd_check = store.update_check.then(|| (update::check_async(&store.update_source, &cc.egui_ctx), false));
         Self {
             wakes: Vec::new(),
             upd_check,
@@ -4880,7 +4880,7 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::TextEdit::singleline(source)
-                                .hint_text(r"\\server\software\RdpManager  oder  https://…/")
+                                .hint_text(format!("leer = {}", update::DEFAULT_SOURCE))
                                 .desired_width(420.0),
                         );
                         if ui.button("…").on_hover_text("Ordner wählen").clicked()
@@ -4889,7 +4889,8 @@ impl App {
                             *source = d.display().to_string();
                         }
                     });
-                    ui.weak("Ordner (z. B. Netzlaufwerk) oder Webadresse, unter der die Dateien „RdpManager-x.y.z-x64.msi“ liegen. \
+                    ui.weak("Leer lassen für die offiziellen Releases auf GitHub. Alternativ ein GitHub-Repository (github.com/besitzer/repo), \
+                             ein Ordner (z. B. Netzlaufwerk) oder eine Webadresse, unter der die Dateien „RdpManager-x.y.z-x64.msi“ liegen. \
                              Die höchste Version wird gefunden.");
                     ui.checkbox(auto, "Beim Programmstart nach Updates suchen");
                     ui.add_space(6.0);
@@ -4904,7 +4905,7 @@ impl App {
                     }
                     ui.separator();
                     ui.horizontal(|ui| {
-                        if ui.add_enabled(!busy && !source.trim().is_empty(), egui::Button::new("🔍 Jetzt prüfen")).clicked() {
+                        if ui.add_enabled(!busy, egui::Button::new("🔍 Jetzt prüfen")).clicked() {
                             upd_cmd = Some(1);
                         }
                         if let Some(f) = &self.upd_found

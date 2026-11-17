@@ -75,13 +75,66 @@ fn curl(args: &[&str]) -> Result<Vec<u8>, String> {
     Ok(out.stdout)
 }
 
+/// Offizielle Quelle, wenn nichts eingetragen ist
+pub const DEFAULT_SOURCE: &str = "https://github.com/Yuji2k/rdp-manager";
+
+/// Eingetragene Quelle oder – wenn leer – die offizielle GitHub-Seite
+pub fn effective_source(s: &str) -> &str {
+    let s = s.trim().trim_matches('"');
+    if s.is_empty() { DEFAULT_SOURCE } else { s }
+}
+
+/// "https://github.com/besitzer/repo[/releases…]" oder "github.com/besitzer/repo" → (besitzer, repo)
+pub fn github_repo(source: &str) -> Option<(String, String)> {
+    let s = source.trim().trim_end_matches('/');
+    let rest = s.strip_prefix("https://").or_else(|| s.strip_prefix("http://")).unwrap_or(s);
+    let rest = rest.strip_prefix("www.").unwrap_or(rest);
+    let path = rest.strip_prefix("github.com/")?;
+    let mut parts = path.split('/');
+    let owner = parts.next().filter(|p| !p.is_empty())?;
+    let repo = parts.next().filter(|p| !p.is_empty())?.trim_end_matches(".git");
+    Some((owner.to_string(), repo.to_string()))
+}
+
+/// Antwort von api.github.com/repos/…/releases auswerten: höchste Version mit MSI (ohne Entwürfe/Vorabversionen)
+fn from_github_json(json: &str) -> Result<Option<Found>, String> {
+    let v: serde_json::Value = serde_json::from_str(json).map_err(|e| format!("GitHub: unerwartete Antwort ({e})"))?;
+    if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
+        return Err(format!("GitHub: {msg}"));
+    }
+    let releases: Vec<&serde_json::Value> = match v.as_array() {
+        Some(a) => a.iter().collect(),
+        None => vec![&v],
+    };
+    let mut best: Option<Found> = None;
+    for r in releases {
+        if r.get("draft").and_then(|d| d.as_bool()) == Some(true) || r.get("prerelease").and_then(|d| d.as_bool()) == Some(true) {
+            continue;
+        }
+        for a in r.get("assets").and_then(|a| a.as_array()).into_iter().flatten() {
+            let name = a.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let url = a.get("browser_download_url").and_then(|n| n.as_str()).unwrap_or("");
+            if let Some((ver, _)) = find_installers(name).into_iter().next()
+                && !url.is_empty()
+                && best.as_ref().is_none_or(|b| ver > b.version)
+            {
+                best = Some(Found { version: ver, location: url.to_string() });
+            }
+        }
+    }
+    Ok(best)
+}
+
 /// Neueste Version an der Quelle suchen; `None` = keine neuere als die laufende
 pub fn check(source: &str) -> Result<Option<Found>, String> {
-    let source = source.trim().trim_matches('"');
-    if source.is_empty() {
-        return Err("Keine Update-Quelle eingetragen.".into());
-    }
-    let best = if is_url(source) {
+    let source = effective_source(source);
+    let best = if let Some((owner, repo)) = github_repo(source) {
+        let api = format!("https://api.github.com/repos/{owner}/{repo}/releases?per_page=10");
+        let body = curl(&["-H", "Accept: application/vnd.github+json", &api]).map_err(|e| {
+            if e.contains("404") { format!("GitHub-Repository {owner}/{repo} nicht gefunden.") } else { format!("GitHub: {e}") }
+        })?;
+        from_github_json(&String::from_utf8_lossy(&body))?
+    } else if is_url(source) {
         // direkte MSI-Adresse oder Seite/Ordnerliste mit Links
         let (list, base) = if source.to_ascii_lowercase().ends_with(".msi") {
             let name = source.rsplit('/').next().unwrap_or("").to_string();
@@ -160,6 +213,36 @@ mod tests {
             RdpManager-0.1.10.exe RdpManager-abc-x64.msi"#;
         let f = find_installers(html);
         assert_eq!(f, vec![((0, 1, 9), "RdpManager-0.1.9-x64.msi".into()), ((0, 1, 10), "RdpManager-0.1.10-x64.msi".into())]);
+    }
+
+    #[test]
+    fn github() {
+        assert_eq!(github_repo("https://github.com/Yuji2k/rdp-manager"), Some(("Yuji2k".into(), "rdp-manager".into())));
+        assert_eq!(github_repo("github.com/a/b/releases/latest"), Some(("a".into(), "b".into())));
+        assert_eq!(github_repo("https://github.com/a/b.git/"), Some(("a".into(), "b".into())));
+        assert_eq!(github_repo(r"\\server\share"), None);
+        assert_eq!(github_repo("https://github.com/nur-besitzer"), None);
+        assert_eq!(effective_source("  "), DEFAULT_SOURCE);
+        let json = r#"[
+          {"tag_name":"v99.1.0","draft":false,"prerelease":true,"assets":[{"name":"RdpManager-99.1.0-x64.msi","browser_download_url":"https://x/pre.msi"}]},
+          {"tag_name":"v0.3.0","draft":false,"prerelease":false,"assets":[
+             {"name":"RdpManager-0.3.0.exe","browser_download_url":"https://x/a.exe"},
+             {"name":"RdpManager-0.3.0-x64.msi","browser_download_url":"https://x/0.3.0.msi"}]},
+          {"tag_name":"v0.2.0","draft":false,"prerelease":false,"assets":[{"name":"RdpManager-0.2.0-x64.msi","browser_download_url":"https://x/0.2.0.msi"}]}
+        ]"#;
+        assert_eq!(from_github_json(json).unwrap(), Some(Found { version: (0, 3, 0), location: "https://x/0.3.0.msi".into() }));
+        assert_eq!(from_github_json("[]").unwrap(), None);
+        assert!(from_github_json(r#"{"message":"API rate limit exceeded"}"#).is_err());
+    }
+
+    /// Fragt die echte GitHub-Seite ab (nur manuell: cargo test -- --ignored)
+    #[test]
+    #[ignore]
+    fn github_live() {
+        let body = curl(&["-H", "Accept: application/vnd.github+json", "https://api.github.com/repos/Yuji2k/rdp-manager/releases?per_page=10"]).unwrap();
+        let f = from_github_json(&String::from_utf8_lossy(&body)).unwrap().expect("ein Release mit MSI");
+        println!("gefunden: {} {}", version_text(f.version), f.location);
+        assert!(f.version >= (0, 2, 0) && f.location.ends_with("-x64.msi"));
     }
 
     #[test]

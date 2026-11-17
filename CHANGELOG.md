@@ -3,6 +3,7 @@
 ## 0.2.0
 ### Neu
 - **Erste öffentliche Version** – Quellcode auf GitHub unter der MIT-Lizenz.
+- **Updates direkt von GitHub**: Ohne eingetragene Quelle sucht RDP Manager beim Start unter den offiziellen Releases (github.com/Yuji2k/rdp-manager) nach einer neueren Version. Auch eigene GitHub-Repositories lassen sich als Quelle eintragen. Abschaltbar unter *Hilfe > Nach Updates suchen*; Netzwerkordner und Webadressen funktionieren weiterhin.
 - Enthält alle Funktionen der bisherigen Versionen (siehe unten).
 
 ## 0.1.13
