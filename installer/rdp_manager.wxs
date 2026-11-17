@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<!-- WiX 3 Installer für den RDP Manager. Gebaut über ..\build-msi.ps1 -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="RDP Manager"
+           Language="1031"
+           Codepage="1252"
+           Version="$(var.Version)"
+           Manufacturer="RDP Manager"
+           UpgradeCode="6C0E3A57-2B8F-4C1D-9E4A-3F7B5D21A9C4">
+
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64"
+             Description="RDP Manager $(var.Version)" Comments="RDP- und SSH-Verbindungsmanager" />
+
+    <MajorUpgrade DowngradeErrorMessage="Eine neuere Version von [ProductName] ist bereits installiert." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Symbol für Verknüpfungen und "Apps & Features" -->
+    <Icon Id="AppIcon.ico" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPCOMMENTS" Value="RDP- und SSH-Verbindungsmanager" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="RDP Manager" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder" />
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <Component Id="MainExe" Guid="*" Win64="yes">
+        <File Id="RdpManagerExe" Source="$(var.ExePath)" KeyPath="yes" />
+      </Component>
+      <!-- Verknüpfungen brauchen laut ICE43/57 einen HKCU-Schlüssel als KeyPath -->
+      <Component Id="Shortcuts" Guid="B1D7F2C4-6E39-4A85-8C0B-2F4E9A7D3C16">
+        <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="RDP Manager"
+                  Description="RDP- und SSH-Verbindungen verwalten" Target="[#RdpManagerExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
+        <Shortcut Id="DesktopShortcut" Directory="DesktopFolder" Name="RDP Manager"
+                  Description="RDP- und SSH-Verbindungen verwalten" Target="[#RdpManagerExe]" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU" Key="Software\RdpManager" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Main" Title="RDP Manager" Level="1">
+      <ComponentRef Id="MainExe" />
+      <ComponentRef Id="Shortcuts" />
+    </Feature>
+
+    <!-- Dialoge: Willkommen → Zielordner → Installieren (ohne Lizenzseite) -->
+    <UI>
+      <UIRef Id="WixUI_InstallDir" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">1</Publish>
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">1</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApp">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+    </UI>
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="RDP Manager jetzt starten" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <CustomAction Id="LaunchApp" FileKey="RdpManagerExe" ExeCommand="" Return="asyncNoWait" Impersonate="yes" />
+  </Product>
+</Wix>
